@@ -19,7 +19,7 @@ pub enum Statement {
 
 #[derive(Debug)]
 pub enum DefinitionType {
-    Function,
+    Function(usize),
     Variable,
 }
 
@@ -81,8 +81,6 @@ fn parse_statement<'a, 'b>(
 
     let result = match next_token {
         Token::ParenOpen => {
-            definition_map.insert(name.clone(), DefinitionType::Function);
-
             let mut args = Vec::new();
 
             loop {
@@ -106,6 +104,9 @@ fn parse_statement<'a, 'b>(
                 Token::Equals => {}
                 other => return Err(Error::UnexpectedToken(other)),
             }
+
+            assert!(args.len() != 0);
+            definition_map.insert(name.clone(), DefinitionType::Function(args.len()));
 
             (
                 Statement::FunctionDef {

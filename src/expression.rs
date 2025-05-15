@@ -25,6 +25,8 @@ pub enum Expression {
     Subtract(Box<Expression>, Box<Expression>),
     Multiply(Box<Expression>, Box<Expression>),
     Divide(Box<Expression>, Box<Expression>),
+
+    FunctionCall(String, Box<[Expression]>),
 }
 
 const ADD_PRIORITY: u32 = 0;
@@ -37,6 +39,7 @@ const NEG_PRIORITY: u32 = 3;
 enum ExpressionContext {
     Ordered(u32),
     Parenthesis,
+    FunctionArg,
 }
 
 pub fn parse_expression<'a>(
@@ -56,20 +59,6 @@ fn parse_expression_recursive<'a>(
     while !tokens.is_at_end() {
         let next = tokens.next();
         match next {
-            Token::Integer(value) => {
-                if !matches!(cur_expression, Expression::Placeholder) {
-                    return Err(Error::UnexpectedToken(next));
-                }
-
-                cur_expression = Expression::Value(Value::Integer(value));
-            }
-            Token::Number(value) => {
-                if !matches!(cur_expression, Expression::Placeholder) {
-                    return Err(Error::UnexpectedToken(next));
-                }
-
-                cur_expression = Expression::Value(Value::Number(value));
-            }
             Token::Word(name) => {
                 if !matches!(cur_expression, Expression::Placeholder) {
                     return Err(Error::UnexpectedToken(next));
@@ -92,6 +81,46 @@ fn parse_expression_recursive<'a>(
                 }
                 _ => unreachable!(),
             },
+            Token::Integer(value) => {
+                if !matches!(cur_expression, Expression::Placeholder) {
+                    return Err(Error::UnexpectedToken(next));
+                }
+
+                cur_expression = Expression::Value(Value::Integer(value));
+            }
+            Token::Number(value) => {
+                if !matches!(cur_expression, Expression::Placeholder) {
+                    return Err(Error::UnexpectedToken(next));
+                }
+
+                cur_expression = Expression::Value(Value::Number(value));
+            }
+
+            Token::Comma => {
+                if matches!(cur_expression, Expression::Placeholder) {
+                    return Err(Error::UnexpectedToken(next));
+                } else {
+                    let Some(topmost) = context.pop() else {
+                        return Err(Error::UnexpectedToken(next));
+                    };
+
+                    if matches!(topmost, ExpressionContext::FunctionArg) {
+                        // Backtrack to avoid comma, caller will handle it
+                        tokens.backtrack(1);
+                        return Ok(cur_expression);
+                    }
+
+                    for ctx in context.iter().rev() {
+                        if matches!(ctx, ExpressionContext::FunctionArg) {
+                            // Backtrack to avoid comma, caller will handle it
+                            tokens.backtrack(1);
+                            return Ok(cur_expression);
+                        }
+                    }
+
+                    return Err(Error::UnexpectedToken(next));
+                }
+            }
 
             Token::ParenOpen => {
                 match cur_expression {
@@ -101,6 +130,53 @@ fn parse_expression_recursive<'a>(
 
                         let obj = parse_expression_recursive(tokens, definition_map, new_context)?;
                         cur_expression = obj;
+                    }
+                    Expression::Value(Value::Variable(ref name)) => {
+                        // Depending on the definition of `name`, this is an
+                        // implicit multiplication or a function call
+                        let def = definition_map.get(name);
+                        if let Some(DefinitionType::Function(num_args)) = def {
+                            assert!(*num_args != 0);
+
+                            let mut args = Vec::with_capacity(*num_args);
+                            for _ in 0..num_args - 1 {
+                                let mut new_context = context.clone();
+                                new_context.push(ExpressionContext::FunctionArg);
+
+                                let arg_expr = parse_expression_recursive(
+                                    tokens,
+                                    definition_map,
+                                    new_context,
+                                )?;
+                                args.push(arg_expr);
+
+                                match tokens.next() {
+                                    Token::Comma => {}
+                                    other => return Err(Error::UnexpectedToken(other)),
+                                }
+                            }
+
+                            let mut new_context = context.clone();
+                            new_context.push(ExpressionContext::Parenthesis);
+
+                            let last_arg =
+                                parse_expression_recursive(tokens, definition_map, new_context)?;
+                            args.push(last_arg);
+
+                            // Last arg has a parenthesis instead of a comma after it
+
+                            cur_expression =
+                                Expression::FunctionCall(name.clone(), args.into_boxed_slice());
+                        } else {
+                            // Implicit multiplication
+                            let mut new_context = context.clone();
+                            new_context.push(ExpressionContext::Parenthesis);
+
+                            let rhs =
+                                parse_expression_recursive(tokens, definition_map, new_context)?;
+                            cur_expression =
+                                Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
+                        }
                     }
                     _ => {
                         // This is an implicit multiplication, such as one of the
@@ -232,10 +308,15 @@ fn parse_expression_recursive<'a>(
 
     if matches!(cur_expression, Expression::Placeholder) {
         Err(Error::UnexpectedEOI)
-    } else if matches!(context.last(), Some(ExpressionContext::Parenthesis)) {
-        // We should never get here in a Parenthesis context, since encountering a
-        // ParenClose will always return with a result. So if we got here, it
-        // means that we had a Parenthesis context that didn't end in a ParenClose.
+    } else if matches!(
+        context.last(),
+        Some(ExpressionContext::Parenthesis | ExpressionContext::FunctionArg)
+    ) {
+        // We should never get here in a Parenthesis or FunctionArg context, since
+        // encountering a ParenClose or Comma, respectively, will always return
+        // with a result. So if we got here, it means that we had a Parenthesis
+        // context that didn't end in a ParenClose or a FunctionArg context that
+        // didn't end in a Comma.
         Err(Error::UnexpectedEOI)
     } else {
         Ok(cur_expression)
