@@ -21,12 +21,14 @@ pub enum Expression {
     Add(Box<Expression>, Box<Expression>),
     Subtract(Box<Expression>, Box<Expression>),
     Multiply(Box<Expression>, Box<Expression>),
+    Divide(Box<Expression>, Box<Expression>),
 }
 
 const ADD_PRIORITY: u32 = 0;
 const SUB_PRIORITY: u32 = 0;
 const MUL_PRIORITY: u32 = 1;
-const NEG_PRIORITY: u32 = 2;
+const DIV_PRIORITY: u32 = 2;
+const NEG_PRIORITY: u32 = 3;
 
 #[derive(Clone, Copy, Debug)]
 enum ExpressionContext {
@@ -194,6 +196,26 @@ fn parse_expression_recursive<'a>(
                 let rhs = parse_expression_recursive(tokens, new_context)?;
 
                 cur_expression = Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
+            }
+
+            Token::Slash => {
+                if matches!(cur_expression, Expression::Placeholder) {
+                    return Err(Error::UnexpectedToken(next));
+                } else if let Some(ExpressionContext::Ordered(o)) = context.last() {
+                    // handle -a / b: this will force the (-a) to be its
+                    // own expression
+                    if *o > DIV_PRIORITY {
+                        tokens.backtrack(1);
+                        return Ok(cur_expression);
+                    }
+                }
+
+                let mut new_context = context.clone();
+                new_context.push(ExpressionContext::Ordered(DIV_PRIORITY));
+
+                let rhs = parse_expression_recursive(tokens, new_context)?;
+
+                cur_expression = Expression::Divide(Box::new(cur_expression), Box::new(rhs));
             }
 
             // unimplemented
