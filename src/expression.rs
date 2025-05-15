@@ -16,12 +16,17 @@ pub enum Expression {
 
     Value(Value),
 
+    Negate(Box<Expression>),
+
     Add(Box<Expression>, Box<Expression>),
+    Subtract(Box<Expression>, Box<Expression>),
     Multiply(Box<Expression>, Box<Expression>),
 }
 
 const ADD_PRIORITY: u32 = 0;
-const MULT_PRIORITY: u32 = 1;
+const SUB_PRIORITY: u32 = 0;
+const MUL_PRIORITY: u32 = 1;
+const NEG_PRIORITY: u32 = 1;
 
 #[derive(Clone, Copy, Debug)]
 enum ExpressionContext {
@@ -145,13 +150,39 @@ fn parse_expression_recursive<'a>(
                 cur_expression = Expression::Add(Box::new(cur_expression), Box::new(rhs));
             }
 
+            Token::Minus => {
+                if matches!(cur_expression, Expression::Placeholder) {
+                    // Handle negation, such as -3 or -x or -(y + 7)
+                    let mut new_context = context.clone();
+                    new_context.push(ExpressionContext::Ordered(NEG_PRIORITY));
+
+                    let expr = parse_expression_recursive(tokens, new_context)?;
+                    cur_expression = Expression::Negate(Box::new(expr));
+                    continue;
+                } else if let Some(ExpressionContext::Ordered(o)) = context.last() {
+                    // handle a * b - c: this will force the (a * b) to be its
+                    // own expression
+                    if *o > SUB_PRIORITY {
+                        tokens.backtrack(1);
+                        return Ok(cur_expression);
+                    }
+                }
+
+                let mut new_context = context.clone();
+                new_context.push(ExpressionContext::Ordered(SUB_PRIORITY));
+
+                let rhs = parse_expression_recursive(tokens, new_context)?;
+
+                cur_expression = Expression::Subtract(Box::new(cur_expression), Box::new(rhs));
+            }
+
             Token::Asterisk => {
                 if matches!(cur_expression, Expression::Placeholder) {
                     return Err(Error::UnexpectedToken(next));
                 }
 
                 let mut new_context = context.clone();
-                new_context.push(ExpressionContext::Ordered(MULT_PRIORITY));
+                new_context.push(ExpressionContext::Ordered(MUL_PRIORITY));
 
                 let rhs = parse_expression_recursive(tokens, new_context)?;
 
