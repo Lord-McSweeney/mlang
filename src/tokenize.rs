@@ -3,6 +3,7 @@ use crate::error::Error;
 #[derive(Clone, Copy, Debug)]
 pub enum Token<'a> {
     Word(&'a str),
+    WordAfterNumeric(&'a str),
     Integer(i32),
     Number(f64),
 
@@ -25,6 +26,7 @@ pub enum Token<'a> {
 #[derive(Clone, Copy)]
 enum ParseState {
     Word { start: usize, end: usize },
+    WordAfterNumeric { start: usize, end: usize },
     Integer { value: i32 },
     Number { value: f64 },
     NumberWithDot { value: f64, trailing_digits: u32 },
@@ -39,6 +41,10 @@ impl ParseState {
             ParseState::Word { start, end } => {
                 let cur_text = &data[*start..=*end];
                 Some(Token::Word(cur_text))
+            }
+            ParseState::WordAfterNumeric { start, end } => {
+                let cur_text = &data[*start..=*end];
+                Some(Token::WordAfterNumeric(cur_text))
             }
             ParseState::Integer { value } => Some(Token::Integer(*value)),
             ParseState::Number { value } | ParseState::NumberWithDot { value, .. } => {
@@ -62,12 +68,23 @@ pub fn tokenize<'a>(data: &'a str) -> Result<Vec<Token<'a>>, Error<'a>> {
         let ch = ch as u8;
         match ch {
             b'A'..=b'Z' | b'a'..=b'z' => match &mut parse_state {
-                ParseState::Word { end, .. } => {
+                ParseState::Word { end, .. } | ParseState::WordAfterNumeric { end, .. } => {
                     *end += 1;
                 }
-                ParseState::Integer { .. }
-                | ParseState::Number { .. }
-                | ParseState::NumberWithDot { .. } => {
+                ParseState::Integer { value } => {
+                    // This is an implicit multiplication, such as of the form 3x
+
+                    tokens.push(Token::Integer(*value));
+                    parse_state = ParseState::WordAfterNumeric { start: i, end: i };
+                }
+                ParseState::Number { value } => {
+                    // This is an implicit multiplication, such as of the form 100000000x
+
+                    tokens.push(Token::Number(*value));
+                    parse_state = ParseState::WordAfterNumeric { start: i, end: i };
+                }
+                ParseState::NumberWithDot { .. } => {
+                    // FIXME should 3.4x be valid syntax?
                     return Err(Error::UnexpectedCharacter(ch as char));
                 }
                 ParseState::None => {
@@ -76,7 +93,7 @@ pub fn tokenize<'a>(data: &'a str) -> Result<Vec<Token<'a>>, Error<'a>> {
             },
             b'0'..=b'9' => {
                 match &mut parse_state {
-                    ParseState::Word { .. } => {
+                    ParseState::Word { .. } | ParseState::WordAfterNumeric { .. } => {
                         return Err(Error::UnexpectedCharacter(ch as char));
                     }
                     ParseState::Integer { value } => {
@@ -115,7 +132,7 @@ pub fn tokenize<'a>(data: &'a str) -> Result<Vec<Token<'a>>, Error<'a>> {
                 }
             }
             b'.' => match &mut parse_state {
-                ParseState::Word { .. } => {
+                ParseState::Word { .. } | ParseState::WordAfterNumeric { .. } => {
                     return Err(Error::UnexpectedCharacter(ch as char));
                 }
                 ParseState::Integer { value } => {

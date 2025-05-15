@@ -63,17 +63,42 @@ fn parse_expression_recursive<'a>(
 
                 cur_expression = Expression::Value(Value::Variable(name.to_string()));
             }
+            Token::WordAfterNumeric(name) => match cur_expression {
+                Expression::Value(Value::Integer(other)) => {
+                    let lhs = Expression::Value(Value::Integer(other));
+                    let rhs = Expression::Value(Value::Variable(name.to_string()));
+
+                    cur_expression = Expression::Multiply(Box::new(lhs), Box::new(rhs));
+                }
+                Expression::Value(Value::Number(other)) => {
+                    let lhs = Expression::Value(Value::Number(other));
+                    let rhs = Expression::Value(Value::Variable(name.to_string()));
+
+                    cur_expression = Expression::Multiply(Box::new(lhs), Box::new(rhs));
+                }
+                _ => unreachable!(),
+            },
 
             Token::ParenOpen => {
-                if !matches!(cur_expression, Expression::Placeholder) {
-                    unimplemented!("unimplemented implicit multiplication");
+                match cur_expression {
+                    Expression::Placeholder => {
+                        let mut new_context = context.clone();
+                        new_context.push(ExpressionContext::Parenthesis);
+
+                        let obj = parse_expression_recursive(tokens, new_context)?;
+                        cur_expression = obj;
+                    }
+                    _ => {
+                        // This is an implicit multiplication, such as one of the
+                        // form 3(x + 1) or x(x + 1)
+                        let mut new_context = context.clone();
+                        new_context.push(ExpressionContext::Parenthesis);
+
+                        let rhs = parse_expression_recursive(tokens, new_context)?;
+                        cur_expression =
+                            Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
+                    }
                 }
-
-                let mut new_context = context.clone();
-                new_context.push(ExpressionContext::Parenthesis);
-
-                let obj = parse_expression_recursive(tokens, new_context)?;
-                cur_expression = obj;
             }
 
             Token::ParenClose => {
