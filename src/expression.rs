@@ -26,7 +26,7 @@ pub enum Expression {
 const ADD_PRIORITY: u32 = 0;
 const SUB_PRIORITY: u32 = 0;
 const MUL_PRIORITY: u32 = 1;
-const NEG_PRIORITY: u32 = 1;
+const NEG_PRIORITY: u32 = 2;
 
 #[derive(Clone, Copy, Debug)]
 enum ExpressionContext {
@@ -179,6 +179,13 @@ fn parse_expression_recursive<'a>(
             Token::Asterisk => {
                 if matches!(cur_expression, Expression::Placeholder) {
                     return Err(Error::UnexpectedToken(next));
+                } else if let Some(ExpressionContext::Ordered(o)) = context.last() {
+                    // handle -a * b: this will force the (-a) to be its
+                    // own expression
+                    if *o > MUL_PRIORITY {
+                        tokens.backtrack(1);
+                        return Ok(cur_expression);
+                    }
                 }
 
                 let mut new_context = context.clone();
