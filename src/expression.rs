@@ -1,5 +1,8 @@
 use crate::error::Error;
+use crate::statement::DefinitionType;
 use crate::tokenize::{Token, TokenReader};
+
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum Value {
@@ -36,12 +39,16 @@ enum ExpressionContext {
     Parenthesis,
 }
 
-pub fn parse_expression<'a>(tokens: &mut TokenReader<'_, 'a>) -> Result<Expression, Error<'a>> {
-    parse_expression_recursive(tokens, vec![])
+pub fn parse_expression<'a>(
+    tokens: &mut TokenReader<'_, 'a>,
+    definition_map: &HashMap<String, DefinitionType>,
+) -> Result<Expression, Error<'a>> {
+    parse_expression_recursive(tokens, definition_map, vec![])
 }
 
 fn parse_expression_recursive<'a>(
     tokens: &mut TokenReader<'_, 'a>,
+    definition_map: &HashMap<String, DefinitionType>,
     mut context: Vec<ExpressionContext>,
 ) -> Result<Expression, Error<'a>> {
     let mut cur_expression = Expression::Placeholder;
@@ -92,7 +99,7 @@ fn parse_expression_recursive<'a>(
                         let mut new_context = context.clone();
                         new_context.push(ExpressionContext::Parenthesis);
 
-                        let obj = parse_expression_recursive(tokens, new_context)?;
+                        let obj = parse_expression_recursive(tokens, definition_map, new_context)?;
                         cur_expression = obj;
                     }
                     _ => {
@@ -101,7 +108,7 @@ fn parse_expression_recursive<'a>(
                         let mut new_context = context.clone();
                         new_context.push(ExpressionContext::Parenthesis);
 
-                        let rhs = parse_expression_recursive(tokens, new_context)?;
+                        let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
                         cur_expression =
                             Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
                     }
@@ -147,7 +154,7 @@ fn parse_expression_recursive<'a>(
                 let mut new_context = context.clone();
                 new_context.push(ExpressionContext::Ordered(ADD_PRIORITY));
 
-                let rhs = parse_expression_recursive(tokens, new_context)?;
+                let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
 
                 cur_expression = Expression::Add(Box::new(cur_expression), Box::new(rhs));
             }
@@ -158,7 +165,7 @@ fn parse_expression_recursive<'a>(
                     let mut new_context = context.clone();
                     new_context.push(ExpressionContext::Ordered(NEG_PRIORITY));
 
-                    let expr = parse_expression_recursive(tokens, new_context)?;
+                    let expr = parse_expression_recursive(tokens, definition_map, new_context)?;
                     cur_expression = Expression::Negate(Box::new(expr));
                     continue;
                 } else if let Some(ExpressionContext::Ordered(o)) = context.last() {
@@ -173,7 +180,7 @@ fn parse_expression_recursive<'a>(
                 let mut new_context = context.clone();
                 new_context.push(ExpressionContext::Ordered(SUB_PRIORITY));
 
-                let rhs = parse_expression_recursive(tokens, new_context)?;
+                let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
 
                 cur_expression = Expression::Subtract(Box::new(cur_expression), Box::new(rhs));
             }
@@ -193,7 +200,7 @@ fn parse_expression_recursive<'a>(
                 let mut new_context = context.clone();
                 new_context.push(ExpressionContext::Ordered(MUL_PRIORITY));
 
-                let rhs = parse_expression_recursive(tokens, new_context)?;
+                let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
 
                 cur_expression = Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
             }
@@ -213,7 +220,7 @@ fn parse_expression_recursive<'a>(
                 let mut new_context = context.clone();
                 new_context.push(ExpressionContext::Ordered(DIV_PRIORITY));
 
-                let rhs = parse_expression_recursive(tokens, new_context)?;
+                let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
 
                 cur_expression = Expression::Divide(Box::new(cur_expression), Box::new(rhs));
             }

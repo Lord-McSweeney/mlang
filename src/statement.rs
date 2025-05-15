@@ -2,6 +2,8 @@ use crate::error::Error;
 use crate::expression::{Expression, parse_expression};
 use crate::tokenize::{Token, TokenReader};
 
+use std::collections::HashMap;
+
 #[derive(Debug)]
 pub enum Statement {
     FunctionDef {
@@ -15,16 +17,23 @@ pub enum Statement {
     },
 }
 
+#[derive(Debug)]
+pub enum DefinitionType {
+    Function,
+    Variable,
+}
+
 pub fn parse_statements<'a>(tokens: &[Token<'a>]) -> Result<Vec<Statement>, Error<'a>> {
-    let mut statements = Vec::new();
+    let mut definition_map = HashMap::new();
+    let mut partial_statements = Vec::new();
     let mut cur_start = 0;
     let mut cur_end = 0;
 
     for (i, token) in tokens.iter().enumerate() {
         if matches!(token, Token::Newline) {
             if cur_start != cur_end {
-                let statement = parse_statement(&tokens[cur_start..cur_end])?;
-                statements.push(statement);
+                let result = parse_statement(&tokens[cur_start..cur_end], &mut definition_map)?;
+                partial_statements.push(result);
             }
 
             cur_start = i + 1;
@@ -34,11 +43,33 @@ pub fn parse_statements<'a>(tokens: &[Token<'a>]) -> Result<Vec<Statement>, Erro
         }
     }
 
-    Ok(statements)
+    // We need to know what definitions are functions and variables before
+    // creating the AST
+
+    partial_statements
+        .into_iter()
+        .map(|(mut statement, tokens)| -> Result<Statement, Error> {
+            match &mut statement {
+                Statement::FunctionDef { expr, .. } => {
+                    let mut tokens = TokenReader::new(tokens);
+                    *expr = parse_expression(&mut tokens, &definition_map)?;
+                }
+                Statement::GlobalVariable { expr, .. } => {
+                    let mut tokens = TokenReader::new(tokens);
+                    *expr = parse_expression(&mut tokens, &definition_map)?;
+                }
+            }
+
+            Ok(statement)
+        })
+        .collect::<Result<Vec<_>, Error>>()
 }
 
-fn parse_statement<'a>(tokens: &[Token<'a>]) -> Result<Statement, Error<'a>> {
-    let mut tokens = TokenReader::new(tokens);
+fn parse_statement<'a, 'b>(
+    raw_tokens: &'b [Token<'a>],
+    definition_map: &mut HashMap<String, DefinitionType>,
+) -> Result<(Statement, &'b [Token<'a>]), Error<'a>> {
+    let mut tokens = TokenReader::new(raw_tokens);
 
     let first_token = tokens.next();
     let name = match first_token {
@@ -48,8 +79,10 @@ fn parse_statement<'a>(tokens: &[Token<'a>]) -> Result<Statement, Error<'a>> {
 
     let next_token = tokens.next();
 
-    let statement = match next_token {
+    let result = match next_token {
         Token::ParenOpen => {
+            definition_map.insert(name.clone(), DefinitionType::Function);
+
             let mut args = Vec::new();
 
             loop {
@@ -74,17 +107,28 @@ fn parse_statement<'a>(tokens: &[Token<'a>]) -> Result<Statement, Error<'a>> {
                 other => return Err(Error::UnexpectedToken(other)),
             }
 
-            let expr = parse_expression(&mut tokens)?;
-
-            Statement::FunctionDef { name, args, expr }
+            (
+                Statement::FunctionDef {
+                    name,
+                    args,
+                    expr: Expression::Placeholder,
+                },
+                &raw_tokens[tokens.current_pos()..],
+            )
         }
         Token::Equals => {
-            let expr = parse_expression(&mut tokens)?;
+            definition_map.insert(name.clone(), DefinitionType::Variable);
 
-            Statement::GlobalVariable { name, expr }
+            (
+                Statement::GlobalVariable {
+                    name,
+                    expr: Expression::Placeholder,
+                },
+                &raw_tokens[tokens.current_pos()..],
+            )
         }
         other => return Err(Error::UnexpectedToken(other)),
     };
 
-    Ok(statement)
+    Ok(result)
 }

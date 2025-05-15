@@ -266,6 +266,10 @@ impl<'a, 'b> TokenReader<'a, 'b> {
         Self { slice, start: 0 }
     }
 
+    pub fn current_pos(&self) -> usize {
+        self.start
+    }
+
     pub fn next(&mut self) -> Token<'b> {
         let value = self.slice[self.start];
         self.start += 1;
