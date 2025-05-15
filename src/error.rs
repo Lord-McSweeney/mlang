@@ -4,4 +4,5 @@ use crate::tokenize::Token;
 pub enum Error<'a> {
     UnexpectedCharacter(char),
     UnexpectedToken(Token<'a>),
+    UnexpectedEOI,
 }

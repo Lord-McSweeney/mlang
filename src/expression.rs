@@ -163,5 +163,14 @@ fn parse_expression_recursive<'a>(
         }
     }
 
-    Ok(cur_expression)
+    if matches!(cur_expression, Expression::Placeholder) {
+        Err(Error::UnexpectedEOI)
+    } else if matches!(context.last(), Some(ExpressionContext::Parenthesis)) {
+        // We should never get here in a Parenthesis context, since encountering a
+        // ParenClose will always return with a result. So if we got here, it
+        // means that we had a Parenthesis context that didn't end in a ParenClose.
+        Err(Error::UnexpectedEOI)
+    } else {
+        Ok(cur_expression)
+    }
 }
