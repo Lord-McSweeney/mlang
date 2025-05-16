@@ -25,6 +25,17 @@ pub enum DefinitionType {
 
 pub fn parse_statements<'a>(tokens: &[Token<'a>]) -> Result<Vec<Statement>, Error<'a>> {
     let mut definition_map = HashMap::new();
+
+    definition_map.insert("sin".to_string(), DefinitionType::Function(1));
+    definition_map.insert("cos".to_string(), DefinitionType::Function(1));
+    definition_map.insert("tan".to_string(), DefinitionType::Function(1));
+
+    definition_map.insert("csc".to_string(), DefinitionType::Function(1));
+    definition_map.insert("sec".to_string(), DefinitionType::Function(1));
+    definition_map.insert("cot".to_string(), DefinitionType::Function(1));
+
+    definition_map.insert("e".to_string(), DefinitionType::Variable);
+
     let mut partial_statements = Vec::new();
     let mut cur_start = 0;
     let mut cur_end = 0;
