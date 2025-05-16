@@ -43,8 +43,7 @@ pub fn parse_statements<'a>(tokens: &[Token<'a>]) -> Result<Vec<Statement>, Erro
         }
     }
 
-    // We need to know what definitions are functions and variables before
-    // creating the AST
+    // We need the `definition_map` created before creating ASTs for expressions
 
     partial_statements
         .into_iter()

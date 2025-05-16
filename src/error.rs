@@ -7,6 +7,5 @@ pub enum Error<'a> {
 
     UnexpectedEOI,
 
-    UnexpectedVariable,
     UnexpectedFunction,
 }

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 pub enum Value {
     Integer(i32),
     Number(f64),
+    Function(String, usize),
     Variable(String),
 }
 
@@ -64,23 +65,78 @@ fn parse_expression_recursive<'a>(
                     return Err(Error::UnexpectedToken(next));
                 }
 
-                cur_expression = Expression::Value(Value::Variable(name.to_string()));
+                let name = name.to_string();
+
+                let expr = match definition_map.get(&name) {
+                    Some(DefinitionType::Function(num_args)) => {
+                        Expression::Value(Value::Function(name.clone(), *num_args))
+                    }
+                    Some(DefinitionType::Variable) => Expression::Value(Value::Variable(name)),
+                    None => {
+                        // TODO this should return an error once we get function
+                        // arguments in the definition_map
+                        Expression::Value(Value::Variable(name))
+                    }
+                };
+
+                cur_expression = expr;
             }
-            Token::WordAfterNumeric(name) => match cur_expression {
-                Expression::Value(Value::Integer(other)) => {
-                    let lhs = Expression::Value(Value::Integer(other));
-                    let rhs = Expression::Value(Value::Variable(name.to_string()));
+            Token::WordAfterNumeric(name) => {
+                let name = name.to_string();
 
-                    cur_expression = Expression::Multiply(Box::new(lhs), Box::new(rhs));
-                }
-                Expression::Value(Value::Number(other)) => {
-                    let lhs = Expression::Value(Value::Number(other));
-                    let rhs = Expression::Value(Value::Variable(name.to_string()));
+                let lhs = match cur_expression {
+                    cur_expression @ Expression::Value(Value::Integer(_)) => cur_expression,
+                    cur_expression @ Expression::Value(Value::Number(_)) => cur_expression,
+                    _ => unreachable!(),
+                };
 
-                    cur_expression = Expression::Multiply(Box::new(lhs), Box::new(rhs));
-                }
-                _ => unreachable!(),
-            },
+                let rhs = match definition_map.get(&name) {
+                    Some(DefinitionType::Function(num_args)) => {
+                        assert!(*num_args != 0);
+
+                        // This is a function call after an implicit multiplication,
+                        // such as 3f(x); right now we're at the `f`, so let's expect
+                        // the next token to be an open parenthesis.
+                        match tokens.next() {
+                            Token::ParenOpen => {}
+                            other => return Err(Error::UnexpectedToken(other)),
+                        }
+
+                        let mut args = Vec::with_capacity(*num_args);
+                        for _ in 0..num_args - 1 {
+                            let mut new_context = context.clone();
+                            new_context.push(ExpressionContext::FunctionArg);
+
+                            let arg_expr =
+                                parse_expression_recursive(tokens, definition_map, new_context)?;
+                            args.push(arg_expr);
+
+                            match tokens.next() {
+                                Token::Comma => {}
+                                other => return Err(Error::UnexpectedToken(other)),
+                            }
+                        }
+
+                        let mut new_context = context.clone();
+                        // Last arg has a parenthesis instead of a comma after it
+                        new_context.push(ExpressionContext::Parenthesis);
+
+                        let last_arg =
+                            parse_expression_recursive(tokens, definition_map, new_context)?;
+                        args.push(last_arg);
+
+                        Expression::FunctionCall(name.clone(), args.into_boxed_slice())
+                    }
+                    Some(DefinitionType::Variable) => Expression::Value(Value::Variable(name)),
+                    None => {
+                        // TODO this should return an error once we get function
+                        // arguments in the definition_map
+                        Expression::Value(Value::Variable(name))
+                    }
+                };
+
+                cur_expression = Expression::Multiply(Box::new(lhs), Box::new(rhs));
+            }
             Token::Integer(value) => {
                 if !matches!(cur_expression, Expression::Placeholder) {
                     return Err(Error::UnexpectedToken(next));
@@ -131,52 +187,43 @@ fn parse_expression_recursive<'a>(
                         let obj = parse_expression_recursive(tokens, definition_map, new_context)?;
                         cur_expression = obj;
                     }
-                    Expression::Value(Value::Variable(ref name)) => {
-                        // Depending on the definition of `name`, this is an
-                        // implicit multiplication or a function call
-                        let def = definition_map.get(name);
-                        if let Some(DefinitionType::Function(num_args)) = def {
-                            assert!(*num_args != 0);
+                    Expression::Value(Value::Function(ref name, num_args)) => {
+                        assert!(num_args != 0);
 
-                            let mut args = Vec::with_capacity(*num_args);
-                            for _ in 0..num_args - 1 {
-                                let mut new_context = context.clone();
-                                new_context.push(ExpressionContext::FunctionArg);
+                        let mut args = Vec::with_capacity(num_args);
+                        for _ in 0..num_args - 1 {
+                            let mut new_context = context.clone();
+                            new_context.push(ExpressionContext::FunctionArg);
 
-                                let arg_expr = parse_expression_recursive(
-                                    tokens,
-                                    definition_map,
-                                    new_context,
-                                )?;
-                                args.push(arg_expr);
+                            let arg_expr =
+                                parse_expression_recursive(tokens, definition_map, new_context)?;
+                            args.push(arg_expr);
 
-                                match tokens.next() {
-                                    Token::Comma => {}
-                                    other => return Err(Error::UnexpectedToken(other)),
-                                }
+                            match tokens.next() {
+                                Token::Comma => {}
+                                other => return Err(Error::UnexpectedToken(other)),
                             }
-
-                            let mut new_context = context.clone();
-                            new_context.push(ExpressionContext::Parenthesis);
-
-                            let last_arg =
-                                parse_expression_recursive(tokens, definition_map, new_context)?;
-                            args.push(last_arg);
-
-                            // Last arg has a parenthesis instead of a comma after it
-
-                            cur_expression =
-                                Expression::FunctionCall(name.clone(), args.into_boxed_slice());
-                        } else {
-                            // Implicit multiplication
-                            let mut new_context = context.clone();
-                            new_context.push(ExpressionContext::Parenthesis);
-
-                            let rhs =
-                                parse_expression_recursive(tokens, definition_map, new_context)?;
-                            cur_expression =
-                                Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
                         }
+
+                        let mut new_context = context.clone();
+                        // Last arg has a parenthesis instead of a comma after it
+                        new_context.push(ExpressionContext::Parenthesis);
+
+                        let last_arg =
+                            parse_expression_recursive(tokens, definition_map, new_context)?;
+                        args.push(last_arg);
+
+                        cur_expression =
+                            Expression::FunctionCall(name.clone(), args.into_boxed_slice());
+                    }
+                    Expression::Value(Value::Variable(ref name)) => {
+                        // Implicit multiplication
+                        let mut new_context = context.clone();
+                        new_context.push(ExpressionContext::Parenthesis);
+
+                        let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
+                        cur_expression =
+                            Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
                     }
                     _ => {
                         // This is an implicit multiplication, such as one of the
