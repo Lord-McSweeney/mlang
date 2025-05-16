@@ -34,6 +34,9 @@ pub fn parse_statements<'a>(tokens: &[Token<'a>]) -> Result<Vec<Statement>, Erro
     definition_map.insert("sec".to_string(), DefinitionType::Function(1));
     definition_map.insert("cot".to_string(), DefinitionType::Function(1));
 
+    definition_map.insert("sqrt".to_string(), DefinitionType::Function(1));
+    definition_map.insert("erf".to_string(), DefinitionType::Function(1));
+
     definition_map.insert("e".to_string(), DefinitionType::Variable);
 
     let mut partial_statements = Vec::new();
