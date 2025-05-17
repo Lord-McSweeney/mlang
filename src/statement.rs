@@ -17,10 +17,25 @@ pub enum Statement {
     },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum DefinitionType {
     Function(usize),
     Variable,
+}
+
+#[derive(Clone, Copy)]
+pub struct DefinitionContext<'a> {
+    definition_map: &'a HashMap<String, DefinitionType>,
+    local_defs: Option<&'a HashMap<String, DefinitionType>>,
+}
+
+impl<'a> DefinitionContext<'a> {
+    pub fn lookup(&self, name: &String) -> Option<DefinitionType> {
+        self.local_defs
+            .and_then(|d| d.get(name))
+            .or_else(|| self.definition_map.get(name))
+            .copied()
+    }
 }
 
 pub fn parse_statements<'a>(tokens: &[Token<'a>]) -> Result<Vec<Statement>, Error<'a>> {
@@ -63,13 +78,29 @@ pub fn parse_statements<'a>(tokens: &[Token<'a>]) -> Result<Vec<Statement>, Erro
         .into_iter()
         .map(|(mut statement, tokens)| -> Result<Statement, Error> {
             match &mut statement {
-                Statement::FunctionDef { expr, .. } => {
+                Statement::FunctionDef { expr, args, .. } => {
+                    // Arguments are defined variables in function bodies
+                    let mut local_defs = HashMap::with_capacity(args.len());
+                    for arg in args {
+                        local_defs.insert(arg.clone(), DefinitionType::Variable);
+                    }
+
+                    let definitions = DefinitionContext {
+                        definition_map: &definition_map,
+                        local_defs: Some(&local_defs),
+                    };
+
                     let mut tokens = TokenReader::new(tokens);
-                    *expr = parse_expression(&mut tokens, &definition_map)?;
+                    *expr = parse_expression(&mut tokens, definitions)?;
                 }
                 Statement::GlobalVariable { expr, .. } => {
+                    let definitions = DefinitionContext {
+                        definition_map: &definition_map,
+                        local_defs: None,
+                    };
+
                     let mut tokens = TokenReader::new(tokens);
-                    *expr = parse_expression(&mut tokens, &definition_map)?;
+                    *expr = parse_expression(&mut tokens, definitions)?;
                 }
             }
 

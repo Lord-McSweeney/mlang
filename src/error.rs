@@ -7,5 +7,7 @@ pub enum Error<'a> {
 
     UnexpectedEOI,
 
-    UnexpectedFunction,
+    UnexpectedFunction(String),
+
+    ReferencedUnboundVariable(String),
 }

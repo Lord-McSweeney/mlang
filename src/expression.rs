@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::statement::DefinitionType;
+use crate::statement::{DefinitionContext, DefinitionType};
 use crate::tokenize::{Token, TokenReader};
 
 use std::collections::HashMap;
@@ -43,19 +43,36 @@ enum ExpressionContext {
     FunctionArg,
 }
 
-pub fn parse_expression<'a>(
+pub fn parse_expression<'a, 'b>(
     tokens: &mut TokenReader<'_, 'a>,
-    definition_map: &HashMap<String, DefinitionType>,
+    definitions: DefinitionContext<'b>,
 ) -> Result<Expression, Error<'a>> {
-    parse_expression_recursive(tokens, definition_map, vec![])
+    parse_expression_recursive(tokens, definitions, vec![])
 }
 
-fn parse_expression_recursive<'a>(
+fn parse_expression_recursive<'a, 'b>(
     tokens: &mut TokenReader<'_, 'a>,
-    definition_map: &HashMap<String, DefinitionType>,
+    definitions: DefinitionContext<'b>,
     mut context: Vec<ExpressionContext>,
 ) -> Result<Expression, Error<'a>> {
     let mut cur_expression = Expression::Placeholder;
+
+    macro_rules! forbid_func_in {
+        ($value:expr) => {
+            if let Expression::Value(Value::Function(name, _)) = $value {
+                return Err(Error::UnexpectedFunction(name));
+            }
+        };
+        ($value:expr, $value2:expr) => {
+            if let Expression::Value(Value::Function(name, _)) = $value {
+                return Err(Error::UnexpectedFunction(name));
+            }
+
+            if let Expression::Value(Value::Function(name, _)) = $value2 {
+                return Err(Error::UnexpectedFunction(name));
+            }
+        };
+    }
 
     while !tokens.is_at_end() {
         let next = tokens.next();
@@ -67,16 +84,12 @@ fn parse_expression_recursive<'a>(
 
                 let name = name.to_string();
 
-                let expr = match definition_map.get(&name) {
+                let expr = match definitions.lookup(&name) {
                     Some(DefinitionType::Function(num_args)) => {
-                        Expression::Value(Value::Function(name.clone(), *num_args))
+                        Expression::Value(Value::Function(name.clone(), num_args))
                     }
                     Some(DefinitionType::Variable) => Expression::Value(Value::Variable(name)),
-                    None => {
-                        // TODO this should return an error once we get function
-                        // arguments in the definition_map
-                        Expression::Value(Value::Variable(name))
-                    }
+                    None => return Err(Error::ReferencedUnboundVariable(name)),
                 };
 
                 cur_expression = expr;
@@ -90,25 +103,29 @@ fn parse_expression_recursive<'a>(
                     _ => unreachable!(),
                 };
 
-                let rhs = match definition_map.get(&name) {
+                let rhs = match definitions.lookup(&name) {
                     Some(DefinitionType::Function(num_args)) => {
-                        assert!(*num_args != 0);
+                        assert!(num_args != 0);
 
                         // This is a function call after an implicit multiplication,
                         // such as 3f(x); right now we're at the `f`, so let's expect
                         // the next token to be an open parenthesis.
                         match tokens.next() {
                             Token::ParenOpen => {}
-                            other => return Err(Error::UnexpectedToken(other)),
+                            other => return Err(Error::UnexpectedFunction(name)),
                         }
 
-                        let mut args = Vec::with_capacity(*num_args);
+                        let mut args = Vec::with_capacity(num_args);
                         for _ in 0..num_args - 1 {
                             let mut new_context = context.clone();
                             new_context.push(ExpressionContext::FunctionArg);
 
                             let arg_expr =
-                                parse_expression_recursive(tokens, definition_map, new_context)?;
+                                parse_expression_recursive(tokens, definitions, new_context)?;
+
+                            // We don't have first-class functions yet
+                            forbid_func_in!(arg_expr);
+
                             args.push(arg_expr);
 
                             match tokens.next() {
@@ -122,17 +139,13 @@ fn parse_expression_recursive<'a>(
                         new_context.push(ExpressionContext::Parenthesis);
 
                         let last_arg =
-                            parse_expression_recursive(tokens, definition_map, new_context)?;
+                            parse_expression_recursive(tokens, definitions, new_context)?;
                         args.push(last_arg);
 
                         Expression::FunctionCall(name.clone(), args.into_boxed_slice())
                     }
                     Some(DefinitionType::Variable) => Expression::Value(Value::Variable(name)),
-                    None => {
-                        // TODO this should return an error once we get function
-                        // arguments in the definition_map
-                        Expression::Value(Value::Variable(name))
-                    }
+                    None => return Err(Error::ReferencedUnboundVariable(name)),
                 };
 
                 cur_expression = Expression::Multiply(Box::new(lhs), Box::new(rhs));
@@ -184,7 +197,7 @@ fn parse_expression_recursive<'a>(
                         let mut new_context = context.clone();
                         new_context.push(ExpressionContext::Parenthesis);
 
-                        let obj = parse_expression_recursive(tokens, definition_map, new_context)?;
+                        let obj = parse_expression_recursive(tokens, definitions, new_context)?;
                         cur_expression = obj;
                     }
                     Expression::Value(Value::Function(ref name, num_args)) => {
@@ -196,7 +209,11 @@ fn parse_expression_recursive<'a>(
                             new_context.push(ExpressionContext::FunctionArg);
 
                             let arg_expr =
-                                parse_expression_recursive(tokens, definition_map, new_context)?;
+                                parse_expression_recursive(tokens, definitions, new_context)?;
+
+                            // We don't have first-class functions yet
+                            forbid_func_in!(arg_expr);
+
                             args.push(arg_expr);
 
                             match tokens.next() {
@@ -210,7 +227,7 @@ fn parse_expression_recursive<'a>(
                         new_context.push(ExpressionContext::Parenthesis);
 
                         let last_arg =
-                            parse_expression_recursive(tokens, definition_map, new_context)?;
+                            parse_expression_recursive(tokens, definitions, new_context)?;
                         args.push(last_arg);
 
                         cur_expression =
@@ -221,7 +238,7 @@ fn parse_expression_recursive<'a>(
                         let mut new_context = context.clone();
                         new_context.push(ExpressionContext::Parenthesis);
 
-                        let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
+                        let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
                         cur_expression =
                             Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
                     }
@@ -231,7 +248,7 @@ fn parse_expression_recursive<'a>(
                         let mut new_context = context.clone();
                         new_context.push(ExpressionContext::Parenthesis);
 
-                        let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
+                        let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
                         cur_expression =
                             Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
                     }
@@ -277,7 +294,10 @@ fn parse_expression_recursive<'a>(
                 let mut new_context = context.clone();
                 new_context.push(ExpressionContext::Ordered(ADD_PRIORITY));
 
-                let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
+                let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+
+                // f + 3 isn't legal
+                forbid_func_in!(cur_expression, rhs);
 
                 cur_expression = Expression::Add(Box::new(cur_expression), Box::new(rhs));
             }
@@ -288,7 +308,7 @@ fn parse_expression_recursive<'a>(
                     let mut new_context = context.clone();
                     new_context.push(ExpressionContext::Ordered(NEG_PRIORITY));
 
-                    let expr = parse_expression_recursive(tokens, definition_map, new_context)?;
+                    let expr = parse_expression_recursive(tokens, definitions, new_context)?;
                     cur_expression = Expression::Negate(Box::new(expr));
                     continue;
                 } else if let Some(ExpressionContext::Ordered(o)) = context.last() {
@@ -303,7 +323,10 @@ fn parse_expression_recursive<'a>(
                 let mut new_context = context.clone();
                 new_context.push(ExpressionContext::Ordered(SUB_PRIORITY));
 
-                let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
+                let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+
+                // f - 3 isn't legal
+                forbid_func_in!(cur_expression, rhs);
 
                 cur_expression = Expression::Subtract(Box::new(cur_expression), Box::new(rhs));
             }
@@ -323,7 +346,10 @@ fn parse_expression_recursive<'a>(
                 let mut new_context = context.clone();
                 new_context.push(ExpressionContext::Ordered(MUL_PRIORITY));
 
-                let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
+                let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+
+                // f * 3 isn't legal
+                forbid_func_in!(cur_expression, rhs);
 
                 cur_expression = Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
             }
@@ -343,7 +369,10 @@ fn parse_expression_recursive<'a>(
                 let mut new_context = context.clone();
                 new_context.push(ExpressionContext::Ordered(DIV_PRIORITY));
 
-                let rhs = parse_expression_recursive(tokens, definition_map, new_context)?;
+                let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+
+                // f / 3 isn't legal
+                forbid_func_in!(cur_expression, rhs);
 
                 cur_expression = Expression::Divide(Box::new(cur_expression), Box::new(rhs));
             }
