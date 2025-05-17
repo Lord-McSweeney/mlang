@@ -1,6 +1,6 @@
-use crate::error::Error;
-use crate::statement::{DefinitionContext, DefinitionType};
-use crate::tokenize::{Token, TokenReader};
+use super::error::Error;
+use super::statement::{DefinitionContext, DefinitionType};
+use super::tokenize::{Token, TokenReader};
 
 use std::collections::HashMap;
 

@@ -1,7 +1,7 @@
-mod error;
-mod expression;
-mod statement;
-mod tokenize;
+pub(crate) mod read;
+
+use read::statement;
+use read::tokenize;
 
 use std::env;
 use std::fs;

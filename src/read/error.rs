@@ -1,4 +1,4 @@
-use crate::tokenize::Token;
+use super::tokenize::Token;
 
 #[derive(Debug)]
 pub enum Error<'a> {

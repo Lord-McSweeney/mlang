@@ -1,6 +1,6 @@
-use crate::error::Error;
-use crate::expression::{Expression, parse_expression};
-use crate::tokenize::{Token, TokenReader};
+use super::error::Error;
+use super::expression::{Expression, parse_expression};
+use super::tokenize::{Token, TokenReader};
 
 use std::collections::HashMap;
 
