@@ -270,10 +270,10 @@ impl<'a, 'b> TokenReader<'a, 'b> {
         self.start
     }
 
-    pub fn next(&mut self) -> Token<'b> {
-        let value = self.slice[self.start];
+    pub fn next(&mut self) -> Option<Token<'b>> {
+        let value = self.slice.get(self.start).copied()?;
         self.start += 1;
-        value
+        Some(value)
     }
 
     pub fn backtrack(&mut self, num_back: usize) {

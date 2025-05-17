@@ -115,20 +115,20 @@ fn parse_statement<'a, 'b>(
 ) -> Result<(Statement, &'b [Token<'a>]), Error<'a>> {
     let mut tokens = TokenReader::new(raw_tokens);
 
-    let first_token = tokens.next();
+    let first_token = tokens.next().ok_or(Error::UnexpectedEOI)?;
     let name = match first_token {
         Token::Word(word) => word.to_string(),
         other => return Err(Error::UnexpectedToken(other)),
     };
 
-    let next_token = tokens.next();
+    let next_token = tokens.next().ok_or(Error::UnexpectedEOI)?;
 
     let result = match next_token {
         Token::ParenOpen => {
             let mut args = Vec::new();
 
             loop {
-                let next = tokens.next();
+                let next = tokens.next().ok_or(Error::UnexpectedEOI)?;
                 match next {
                     Token::Word(name) => {
                         args.push(name.to_string());
@@ -136,7 +136,7 @@ fn parse_statement<'a, 'b>(
                     other => return Err(Error::UnexpectedToken(other)),
                 }
 
-                let next = tokens.next();
+                let next = tokens.next().ok_or(Error::UnexpectedEOI)?;
                 match next {
                     Token::Comma => {}
                     Token::ParenClose => break,
@@ -144,7 +144,7 @@ fn parse_statement<'a, 'b>(
                 }
             }
 
-            match tokens.next() {
+            match tokens.next().ok_or(Error::UnexpectedEOI)? {
                 Token::Equals => {}
                 other => return Err(Error::UnexpectedToken(other)),
             }

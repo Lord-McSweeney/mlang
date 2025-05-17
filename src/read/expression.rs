@@ -74,8 +74,7 @@ fn parse_expression_recursive<'a, 'b>(
         };
     }
 
-    while !tokens.is_at_end() {
-        let next = tokens.next();
+    while let Some(next) = tokens.next() {
         match next {
             Token::Word(name) => {
                 if !matches!(cur_expression, Expression::Placeholder) {
@@ -110,7 +109,7 @@ fn parse_expression_recursive<'a, 'b>(
                         // This is a function call after an implicit multiplication,
                         // such as 3f(x); right now we're at the `f`, so let's expect
                         // the next token to be an open parenthesis.
-                        match tokens.next() {
+                        match tokens.next().ok_or(Error::UnexpectedEOI)? {
                             Token::ParenOpen => {}
                             other @ Token::Comma
                             | other @ Token::ParenClose
@@ -133,7 +132,7 @@ fn parse_expression_recursive<'a, 'b>(
 
                             args.push(arg_expr);
 
-                            match tokens.next() {
+                            match tokens.next().ok_or(Error::UnexpectedEOI)? {
                                 Token::Comma => {}
                                 other => return Err(Error::UnexpectedToken(other)),
                             }
@@ -261,7 +260,7 @@ fn parse_expression_recursive<'a, 'b>(
 
                             args.push(arg_expr);
 
-                            match tokens.next() {
+                            match tokens.next().ok_or(Error::UnexpectedEOI)? {
                                 Token::Comma => {}
                                 other => return Err(Error::UnexpectedToken(other)),
                             }
