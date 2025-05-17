@@ -8,7 +8,7 @@ use std::collections::HashMap;
 pub enum Statement {
     FunctionDef {
         name: String,
-        args: Vec<String>,
+        args: Box<[String]>,
         expr: Expression,
     },
     GlobalVariable {
@@ -155,7 +155,7 @@ fn parse_statement<'a, 'b>(
             (
                 Statement::FunctionDef {
                     name,
-                    args,
+                    args: args.into_boxed_slice(),
                     expr: Expression::Placeholder,
                 },
                 &raw_tokens[tokens.current_pos()..],

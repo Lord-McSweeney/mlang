@@ -2,8 +2,6 @@ use super::error::Error;
 use super::statement::{DefinitionContext, DefinitionType};
 use super::tokenize::{Token, TokenReader};
 
-use std::collections::HashMap;
-
 #[derive(Debug)]
 pub enum Value {
     Integer(i32),
@@ -233,7 +231,7 @@ fn parse_expression_recursive<'a, 'b>(
                         cur_expression =
                             Expression::FunctionCall(name.clone(), args.into_boxed_slice());
                     }
-                    Expression::Value(Value::Variable(ref name)) => {
+                    Expression::Value(Value::Variable(_)) => {
                         // Implicit multiplication
                         let mut new_context = context.clone();
                         new_context.push(ExpressionContext::Parenthesis);

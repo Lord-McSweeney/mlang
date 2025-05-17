@@ -1,7 +1,9 @@
 pub(crate) mod read;
+pub(crate) mod write;
 
 use read::statement;
 use read::tokenize;
+use write::latex;
 
 use std::env;
 use std::fs;
@@ -32,11 +34,21 @@ fn main() {
 
     // SAFETY: The data is ASCII
     let text = unsafe { std::str::from_utf8_unchecked(&data) };
-    let tokens = tokenize::tokenize(&text).unwrap();
+    let tokens = tokenize::tokenize(&text);
 
     println!("{:?}", tokens);
+
+    let Ok(tokens) = tokens else {
+        return;
+    };
 
     let statements = statement::parse_statements(&tokens);
 
     println!("{:?}", statements);
+
+    let Ok(statements) = statements else {
+        return;
+    };
+
+    println!("{}", latex::emit_latex(&statements));
 }
