@@ -49,6 +49,9 @@ pub fn parse_statements<'a>(tokens: &[Token<'a>]) -> Result<Vec<Statement>, Erro
     definition_map.insert("sec".to_string(), DefinitionType::Function(1));
     definition_map.insert("cot".to_string(), DefinitionType::Function(1));
 
+    definition_map.insert("ln".to_string(), DefinitionType::Function(1));
+    definition_map.insert("log".to_string(), DefinitionType::Function(2));
+
     definition_map.insert("sqrt".to_string(), DefinitionType::Function(1));
     definition_map.insert("erf".to_string(), DefinitionType::Function(1));
 
