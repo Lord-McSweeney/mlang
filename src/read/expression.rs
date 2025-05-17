@@ -145,6 +145,9 @@ fn parse_expression_recursive<'a, 'b>(
 
                         let last_arg =
                             parse_expression_recursive(tokens, definitions, new_context)?;
+
+                        forbid_func_in!(last_arg);
+
                         args.push(last_arg);
 
                         let result =
@@ -270,6 +273,9 @@ fn parse_expression_recursive<'a, 'b>(
 
                         let last_arg =
                             parse_expression_recursive(tokens, definitions, new_context)?;
+
+                        forbid_func_in!(last_arg);
+
                         args.push(last_arg);
 
                         cur_expression =
