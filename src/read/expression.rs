@@ -209,6 +209,8 @@ fn parse_expression_recursive<'a, 'b>(
                 cur_expression = Expression::Value(Value::Number(value));
             }
 
+            Token::Newline => unreachable!(),
+
             Token::Comma => {
                 if matches!(cur_expression, Expression::Placeholder) {
                     return Err(Error::UnexpectedToken(next));
@@ -378,6 +380,8 @@ fn parse_expression_recursive<'a, 'b>(
                 }
             }
 
+            Token::Equals => return Err(Error::UnexpectedToken(next)),
+
             Token::Plus => {
                 if matches!(cur_expression, Expression::Placeholder) {
                     return Err(Error::UnexpectedToken(next));
@@ -493,9 +497,6 @@ fn parse_expression_recursive<'a, 'b>(
 
                 cur_expression = Expression::Exp(Box::new(cur_expression), Box::new(rhs));
             }
-
-            // unimplemented
-            _ => unimplemented!("unimplemented token"),
         }
     }
 
