@@ -281,6 +281,14 @@ impl<'a, 'b> TokenReader<'a, 'b> {
         self.start -= num_back;
     }
 
+    pub fn peek(&self) -> Option<Token<'a>> {
+        if !self.is_at_end() {
+            Some(self.slice[self.start])
+        } else {
+            None
+        }
+    }
+
     pub fn is_at_end(&self) -> bool {
         self.start == self.slice.len()
     }

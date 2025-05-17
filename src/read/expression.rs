@@ -24,6 +24,7 @@ pub enum Expression {
     Subtract(Box<Expression>, Box<Expression>),
     Multiply(Box<Expression>, Box<Expression>),
     Divide(Box<Expression>, Box<Expression>),
+    Exp(Box<Expression>, Box<Expression>),
 
     FunctionCall(String, Box<[Expression]>),
 }
@@ -33,6 +34,7 @@ const SUB_PRIORITY: u32 = 0;
 const MUL_PRIORITY: u32 = 1;
 const DIV_PRIORITY: u32 = 2;
 const NEG_PRIORITY: u32 = 3;
+const POW_PRIORITY: u32 = 4;
 
 #[derive(Clone, Copy, Debug)]
 enum ExpressionContext {
@@ -110,7 +112,12 @@ fn parse_expression_recursive<'a, 'b>(
                         // the next token to be an open parenthesis.
                         match tokens.next() {
                             Token::ParenOpen => {}
-                            other => return Err(Error::UnexpectedFunction(name)),
+                            other @ Token::Comma
+                            | other @ Token::ParenClose
+                            | other @ Token::Equals => {
+                                return Err(Error::UnexpectedToken(other));
+                            }
+                            _ => return Err(Error::UnexpectedFunction(name)),
                         }
 
                         let mut args = Vec::with_capacity(num_args);
@@ -140,9 +147,46 @@ fn parse_expression_recursive<'a, 'b>(
                             parse_expression_recursive(tokens, definitions, new_context)?;
                         args.push(last_arg);
 
-                        Expression::FunctionCall(name.clone(), args.into_boxed_slice())
+                        let result =
+                            Expression::FunctionCall(name.clone(), args.into_boxed_slice());
+
+                        if matches!(tokens.peek(), Some(Token::Caret)) {
+                            let _ = tokens.next();
+
+                            // Parse the value after the caret...
+                            let mut new_context = context.clone();
+                            new_context.push(ExpressionContext::Ordered(POW_PRIORITY));
+
+                            let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+
+                            // 3 ^ f isn't legal
+                            forbid_func_in!(rhs);
+
+                            Expression::Exp(Box::new(result), Box::new(rhs))
+                        } else {
+                            result
+                        }
                     }
-                    Some(DefinitionType::Variable) => Expression::Value(Value::Variable(name)),
+                    Some(DefinitionType::Variable) => {
+                        let result = Expression::Value(Value::Variable(name));
+
+                        if matches!(tokens.peek(), Some(Token::Caret)) {
+                            let _ = tokens.next();
+
+                            // Parse the value after the caret...
+                            let mut new_context = context.clone();
+                            new_context.push(ExpressionContext::Ordered(POW_PRIORITY));
+
+                            let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+
+                            // f ^ 3 isn't legal...?
+                            forbid_func_in!(rhs);
+
+                            Expression::Exp(Box::new(result), Box::new(rhs))
+                        } else {
+                            result
+                        }
+                    }
                     None => return Err(Error::ReferencedUnboundVariable(name)),
                 };
 
@@ -236,9 +280,35 @@ fn parse_expression_recursive<'a, 'b>(
                         let mut new_context = context.clone();
                         new_context.push(ExpressionContext::Parenthesis);
 
-                        let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+                        let mul_rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+
+                        forbid_func_in!(mul_rhs);
+
+                        // Parse something like y(x + 2)^5, which is a special case
+                        // because implicit multiplication is too special to work
+                        // with the regular regular "push a context and recursively
+                        // parse the next value" approach
+                        let result = if matches!(tokens.peek(), Some(Token::Caret)) {
+                            let _ = tokens.next();
+
+                            // Parse the value after the caret...
+                            let mut new_context = context.clone();
+                            new_context.push(ExpressionContext::Ordered(POW_PRIORITY));
+
+                            let pow_rhs =
+                                parse_expression_recursive(tokens, definitions, new_context)?;
+
+                            // 3 ^ f isn't legal
+                            forbid_func_in!(pow_rhs);
+
+                            Expression::Exp(Box::new(mul_rhs), Box::new(pow_rhs))
+                        } else {
+                            // Just use the expression if it wasn't the special-case
+                            mul_rhs
+                        };
+
                         cur_expression =
-                            Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
+                            Expression::Multiply(Box::new(cur_expression), Box::new(result));
                     }
                     _ => {
                         // This is an implicit multiplication, such as one of the
@@ -246,9 +316,35 @@ fn parse_expression_recursive<'a, 'b>(
                         let mut new_context = context.clone();
                         new_context.push(ExpressionContext::Parenthesis);
 
-                        let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+                        let mul_rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+
+                        forbid_func_in!(mul_rhs);
+
+                        // Parse something like 3(x + 2)^5, which is a special case
+                        // because implicit multiplication is too special to work
+                        // with the regular regular "push a context and recursively
+                        // parse the next value" approach
+                        let result = if matches!(tokens.peek(), Some(Token::Caret)) {
+                            let _ = tokens.next();
+
+                            // Parse the value after the caret...
+                            let mut new_context = context.clone();
+                            new_context.push(ExpressionContext::Ordered(POW_PRIORITY));
+
+                            let pow_rhs =
+                                parse_expression_recursive(tokens, definitions, new_context)?;
+
+                            // 3 ^ f isn't legal
+                            forbid_func_in!(pow_rhs);
+
+                            Expression::Exp(Box::new(mul_rhs), Box::new(pow_rhs))
+                        } else {
+                            // Just use the expression if it wasn't the special-case
+                            mul_rhs
+                        };
+
                         cur_expression =
-                            Expression::Multiply(Box::new(cur_expression), Box::new(rhs));
+                            Expression::Multiply(Box::new(cur_expression), Box::new(result));
                     }
                 }
             }
@@ -373,6 +469,24 @@ fn parse_expression_recursive<'a, 'b>(
                 forbid_func_in!(cur_expression, rhs);
 
                 cur_expression = Expression::Divide(Box::new(cur_expression), Box::new(rhs));
+            }
+
+            Token::Caret => {
+                if matches!(cur_expression, Expression::Placeholder) {
+                    return Err(Error::UnexpectedToken(next));
+                }
+
+                // Nothing is greater than POW priority, so we don't check here
+
+                let mut new_context = context.clone();
+                new_context.push(ExpressionContext::Ordered(POW_PRIORITY));
+
+                let rhs = parse_expression_recursive(tokens, definitions, new_context)?;
+
+                // f ^ 3 isn't legal...?
+                forbid_func_in!(cur_expression, rhs);
+
+                cur_expression = Expression::Exp(Box::new(cur_expression), Box::new(rhs));
             }
 
             // unimplemented
